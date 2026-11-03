@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ממלכת הענן הקסום – עולם הבלוקים</title>
+<style>
+ html,body{margin:0;height:100%;overflow:hidden;background:#87ceeb;font-family:"Arial Rounded MT Bold","Comic Sans MS",Arial,sans-serif;user-select:none}
+ canvas{display:block}
+ #cross{position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px;pointer-events:none;z-index:2}
+ #cross:before,#cross:after{content:"";position:absolute;background:#fff;box-shadow:0 0 3px #000}
+ #cross:before{left:10px;top:0;width:2px;height:22px}#cross:after{top:10px;left:0;height:2px;width:22px}
+ #bar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:3;direction:ltr}
+ .slot{width:54px;height:54px;border-radius:12px;border:4px solid rgba(255,255,255,.6);box-sizing:border-box;position:relative;cursor:pointer;box-shadow:0 3px 8px rgba(0,0,0,.35)}
+ .slot.sel{border-color:#ffe14d;transform:translateY(-8px) scale(1.15)}
+ .slot span{position:absolute;top:-2px;left:3px;font-size:12px;color:#fff;text-shadow:0 0 3px #000}
+ #hud{position:fixed;top:10px;right:14px;color:#fff;font-size:20px;text-shadow:0 2px 4px #000;z-index:3;text-align:right}
+ #menu{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#fff;background:rgba(40,20,90,.55);backdrop-filter:blur(4px)}
+ #menu.hide{display:none}
+ h1{font-size:clamp(32px,6vw,64px);margin:0 0 8px;text-shadow:0 4px 0 #ff5fa2}
+ p{font-size:clamp(15px,2.4vw,22px);margin:5px 14px;line-height:1.5}
+ button,a.btn{font:inherit;font-size:30px;color:#fff;background:linear-gradient(#ff7ac0,#ff3d8b);border:0;border-radius:40px;padding:12px 44px;cursor:pointer;box-shadow:0 6px 0 #b81e63;margin:12px;text-decoration:none;display:inline-block}
+ button:active{transform:translateY(4px)}
+ #toast{position:fixed;top:18%;left:50%;transform:translateX(-50%);color:#fff;font-size:32px;text-shadow:0 3px 6px #000;z-index:4;opacity:0;transition:opacity .4s;pointer-events:none}
+ .k{display:inline-block;background:rgba(255,255,255,.25);border-radius:8px;padding:0 10px;margin:0 3px}
+</style>
+</head>
+<body>
+<div id="cross"></div>
+<div id="hud">⭐ <span id="stars">0</span> / 10 כוכבים</div>
+<div id="bar"></div>
+<div id="toast"></div>
+<div id="menu">
+ <h1>🧱 עולם הבלוקים הקסום ✨</h1>
+ <p>בנו, חפרו וטוסו בעולם שלכם!<br>מצאו את 10 הכוכבים הזהובים ⭐ וחפשו חזירונים ורודים 🐷</p>
+ <p><span class="k">W A S D</span> הליכה · <span class="k">רווח</span> קפיצה (פעמיים = טיסה! 🕊️) · <span class="k">עכבר</span> הסתכלות<br>
+ <span class="k">לחיצה שמאלית</span> שבירה · <span class="k">לחיצה ימנית</span> הנחה · <span class="k">1-9 / גלגל</span> בחירת בלוק</p>
+ <button id="go">!יאללה לשחק</button>
+ <a class="btn" style="font-size:20px;padding:8px 28px;background:linear-gradient(#6ac8ff,#2f8fe8);box-shadow:0 5px 0 #1a5fa8" href="index.html">⬅️ חזרה לממלכת הענן</a>
+</div>
+<script src="lib/three.min.js"></script>
+<script>
+/* ===== setup ===== */
+const SX=64,SZ=64,SY=40,CH=16;
+const scene=new THREE.Scene();
+const SKY=0x8fd3ff;scene.background=new THREE.Color(SKY);scene.fog=new THREE.Fog(SKY,35,95);
+const cam=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,200);cam.rotation.order='YXZ';
+const ren=new THREE.WebGLRenderer({antialias:true});ren.setPixelRatio(Math.min(devicePixelRatio,2));ren.setSize(innerWidth,innerHeight);
+document.body.appendChild(ren.domElement);
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight)});
+
+/* ===== blocks ===== */
+const B=[null,
+ {n:'דשא',c:[0x5cc84a]},{n:'אדמה',c:[0x8b5a2b]},{n:'אבן',c:[0x9a9aa5]},{n:'עץ',c:[0xb07a3c]},
+ {n:'עלים',c:[0x2fa84f]},{n:'חול',c:[0xf2e2a0]},{n:'סוכריה',c:[0xff6fb5]},{n:'זהב',c:[0xffd23f]},
+ {n:'שמיים',c:[0x4db8ff]},{n:'קשת',rainbow:1,c:[0xff4d4d]},{n:'ענן',c:[0xffffff]},{n:'כוכב',c:[0xfff176],glow:1}
+];
+const HOT=[1,3,4,7,8,9,10,11,12]; // hotbar
+const hex=h=>[(h>>16&255)/255,(h>>8&255)/255,(h&255)/255];
+const RAIN=[0xff4d4d,0xff9f40,0xffe14d,0x5ee06a,0x4db8ff,0xb36bff];
+function hash(x,y,z){let h=x*374761393+y*668265263+z*2147483647;h=(h^(h>>13))*1274126177;return((h^(h>>16))>>>0)/4294967295}
+
+/* ===== world ===== */
+const world=new Uint8Array(SX*SY*SZ);
+const idx=(x,y,z)=>(y*SZ+z)*SX+x;
+const get=(x,y,z)=>(x<0||z<0||x>=SX||z>=SZ||y<0)?(y<0?3:0):(y>=SY?0:world[idx(x,y,z)]);
+const set=(x,y,z,v)=>{if(x>=0&&z>=0&&x<SX&&z<SZ&&y>=0&&y<SY)world[idx(x,y,z)]=v};
+function gen(){
+  const H=(x,z)=>Math.round(10+Math.sin(x*.13)*3+Math.cos(z*.11)*3+Math.sin((x+z)*.06)*4+Math.sin(x*.4)*Math.cos(z*.4)*1);
+  for(let x=0;x<SX;x++)for(let z=0;z<SZ;z++){
+    const h=H(x,z);
+    for(let y=0;y<=h;y++)set(x,y,z,y===h?(h<=8?6:1):y>h-3?2:3);
+    for(let y=h+1;y<=8;y++)set(x,y,z,9); // lakes
+  }
+  // trees & candy trees
+  for(let i=0;i<40;i++){
+    const x=4+Math.random()*(SX-8)|0,z=4+Math.random()*(SZ-8)|0;let h=0;while(get(x,h+1,z))h++;
+    if(get(x,h,z)!==1)continue;
+    const th=3+Math.random()*2|0,cand=Math.random()<.3;
+    for(let y=1;y<=th;y++)set(x,h+y,z,cand?10:4);
+    for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(let dy=th-1;dy<=th+2;dy++){
+      if(Math.abs(dx)+Math.abs(dz)+Math.max(0,dy-th)*1.2>3.2)continue;
+      if(!get(x+dx,h+dy,z+dz))set(x+dx,h+dy,z+dz,cand?7:5)}
+  }
+  // clouds
+  for(let i=0;i<14;i++){const cx=Math.random()*SX|0,cz=Math.random()*SZ|0,cy=26+Math.random()*4|0;
+    for(let dx=0;dx<5;dx++)for(let dz=0;dz<3;dz++)if(Math.random()<.85)set(cx+dx,cy,cz+dz,11)}
+}
+// stars
+let found=0;const starPos=[];
+function placeStars(){
+  for(let i=0;i<10;i++){let x,z,h;
+    do{x=3+Math.random()*(SX-6)|0;z=3+Math.random()*(SZ-6)|0;h=0;while(get(x,h+1,z))h++}while(h<8);
+    set(x,h+1,z,12);starPos.push([x,h+1,z])}
+}
+gen();placeStars();
+
+/* ===== meshing ===== */
+const FACES=[
+ {d:[1,0,0],s:.8,v:[[1,0,1],[1,0,0],[1,1,0],[1,1,1]]},
+ {d:[-1,0,0],s:.8,v:[[0,0,0],[0,0,1],[0,1,1],[0,1,0]]},
+ {d:[0,1,0],s:1,v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]]},
+ {d:[0,-1,0],s:.55,v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]]},
+ {d:[0,0,1],s:.9,v:[[0,0,1],[1,0,1],[1,1,1],[0,1,1]]},
+ {d:[0,0,-1],s:.7,v:[[1,0,0],[0,0,0],[0,1,0],[1,1,0]]}];
+const mat=new THREE.MeshBasicMaterial({vertexColors:true});
+const chunks={};
+function buildChunk(cx,cz){
+  const pos=[],col=[],ind=[];let n=0;
+  for(let y=0;y<SY;y++)for(let z=cz*CH;z<cz*CH+CH;z++)for(let x=cx*CH;x<cx*CH+CH;x++){
+    const b=world[idx(x,y,z)];if(!b)continue;const def=B[b];
+    const base=def.rainbow?RAIN[(x+y+z)%6]:def.c[0];
+    for(const f of FACES){
+      if(get(x+f.d[0],y+f.d[1],z+f.d[2]))continue;
+      const nz=.9+hash(x,y,z)*.2;const sh=def.glow?1.15:f.s*nz;
+      const c=hex(base);
+      for(const v of f.v){pos.push(x+v[0],y+v[1],z+v[2]);col.push(Math.min(1,c[0]*sh),Math.min(1,c[1]*sh),Math.min(1,c[2]*sh))}
+      ind.push(n,n+1,n+2,n,n+2,n+3);n+=4;
+    }
+  }
+  const key=cx+','+cz;
+  if(chunks[key]){scene.remove(chunks[key]);chunks[key].geometry.dispose()}
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));g.setIndex(ind);
+  g.computeBoundingSphere();
+  const m=new THREE.Mesh(g,mat);scene.add(m);chunks[key]=m;
+}
+for(let cx=0;cx<SX/CH;cx++)for(let cz=0;cz<SZ/CH;cz++)buildChunk(cx,cz);
+function rebuildAround(x,z){
+  const cx=x/CH|0,cz=z/CH|0;buildChunk(cx,cz);
+  if(x%CH===0&&cx>0)buildChunk(cx-1,cz);if(x%CH===CH-1&&cx<SX/CH-1)buildChunk(cx+1,cz);
+  if(z%CH===0&&cz>0)buildChunk(cx,cz-1);if(z%CH===CH-1&&cz<SZ/CH-1)buildChunk(cx,cz+1);
+}
+
+/* ===== player ===== */
+const P={x:SX/2,y:30,z:SZ/2,vx:0,vy:0,vz:0,yaw:0,pitch:0,fly:false,ground:false};
+for(let y=SY-1;y>0;y--)if(get(P.x|0,y,P.z|0)){P.y=y+2;break}
+const HW=.3,PH=1.7,EYE=1.55;
+function solidAt(x,y,z){return get(Math.floor(x),Math.floor(y),Math.floor(z))!==0}
+function collides(x,y,z){
+  for(let dx=-HW;dx<=HW;dx+=HW)for(let dz=-HW;dz<=HW;dz+=HW)for(let dy=0;dy<=PH;dy+=PH/2)
+    if(solidAt(x+dx,y+dy+.001,z+dz))return true;return false}
+function moveAxis(ax,d){
+  const steps=Math.ceil(Math.abs(d)/.2)||1,s=d/steps;
+  for(let i=0;i<steps;i++){
+    const nx=P.x+(ax==='x'?s:0),ny=P.y+(ax==='y'?s:0),nz=P.z+(ax==='z'?s:0);
+    if(collides(nx,ny,nz)){if(ax==='y'){if(d<0)P.ground=true;P.vy=0}else{ax==='x'?P.vx=0:P.vz=0}return}
+    P.x=nx;P.y=ny;P.z=nz}
+}
+const keys={};let locked=false,lastSpace=0;
+addEventListener('keydown',e=>{
+  if(e.repeat)return;keys[e.code]=1;
+  if(e.code==='Space'){const t=performance.now();if(t-lastSpace<300){P.fly=!P.fly;P.vy=0;toast(P.fly?'🕊️ טסים! (רווח = למעלה, Shift = למטה)':'נחתנו!')}lastSpace=t}
+  if(e.key>='1'&&e.key<='9')sel(+e.key-1);
+});
+addEventListener('keyup',e=>keys[e.code]=0);
+addEventListener('mousemove',e=>{if(!locked)return;P.yaw-=e.movementX*.0025;P.pitch=Math.max(-1.55,Math.min(1.55,P.pitch-e.movementY*.0025))});
+addEventListener('wheel',e=>sel((cur+(e.deltaY>0?1:-1)+HOT.length)%HOT.length));
+const menu=document.getElementById('menu');
+document.getElementById('go').onclick=()=>ren.domElement.requestPointerLock();
+document.addEventListener('pointerlockchange',()=>{locked=document.pointerLockElement===ren.domElement;menu.classList.toggle('hide',locked)});
+addEventListener('contextmenu',e=>e.preventDefault());
+
+/* ===== hotbar ===== */
+let cur=0;const bar=document.getElementById('bar');
+HOT.forEach((b,i)=>{const d=document.createElement('div');d.className='slot';const c=B[b].rainbow?'linear-gradient(135deg,#f44,#fa4,#ee4,#5d6,#4be,#b6f)':'#'+B[b].c[0].toString(16).padStart(6,'0');
+  d.style.background=c;d.title=B[b].n;d.innerHTML='<span>'+(i+1)+'</span>';d.onclick=e=>{e.stopPropagation();sel(i)};bar.appendChild(d)});
+function sel(i){cur=i;[...bar.children].forEach((d,j)=>d.classList.toggle('sel',j===i))}sel(0);
+const tEl=document.getElementById('toast');let tt;
+function toast(s){tEl.textContent=s;tEl.style.opacity=1;clearTimeout(tt);tt=setTimeout(()=>tEl.style.opacity=0,1800)}
+
+/* ===== raycast ===== */
+function raycast(){
+  const dir=new THREE.Vector3(0,0,-1).applyEuler(cam.rotation);
+  let x=cam.position.x,y=cam.position.y,z=cam.position.z;
+  let bx=Math.floor(x),by=Math.floor(y),bz=Math.floor(z);
+  const sx=Math.sign(dir.x)||1,sy=Math.sign(dir.y)||1,sz=Math.sign(dir.z)||1;
+  const td=(p,d,s)=>d===0?1e9:((s>0?Math.floor(p)+1-p:p-Math.floor(p))||(s>0?1:0))/Math.abs(d);
+  let tx=td(x,dir.x,sx),ty=td(y,dir.y,sy),tz=td(z,dir.z,sz);
+  const dx=Math.abs(1/dir.x),dy=Math.abs(1/dir.y),dz=Math.abs(1/dir.z);
+  let face=[0,0,0],t=0;
+  while(t<6.5){
+    if(get(bx,by,bz))return{b:[bx,by,bz],n:face};
+    if(tx<ty&&tx<tz){bx+=sx;t=tx;tx+=dx;face=[-sx,0,0]}
+    else if(ty<tz){by+=sy;t=ty;ty+=dy;face=[0,-sy,0]}
+    else{bz+=sz;t=tz;tz+=dz;face=[0,0,-sz]}
+  }
+  return null;
+}
+const hl=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.01,1.01,1.01)),new THREE.LineBasicMaterial({color:0xffffff}));
+hl.visible=false;scene.add(hl);
+const sEl=document.getElementById('stars');
+addEventListener('mousedown',e=>{
+  if(!locked)return;const r=raycast();if(!r)return;
+  const [x,y,z]=r.b;
+  if(e.button===0){
+    const b=get(x,y,z);if(y===0)return;
+    if(b===12){found++;sEl.textContent=found;toast(found>=10?'🎉 מצאתם את כל הכוכבים! אלופים!':'⭐ מצאתם כוכב!');if(found>=10)party()}
+    set(x,y,z,0);rebuildAround(x,z);
+    pop(x+.5,y+.5,z+.5,B[b].rainbow?0xff9f40:B[b].c[0]);
+  }else if(e.button===2){
+    const nx=x+r.n[0],ny=y+r.n[1],nz=z+r.n[2];
+    if(get(nx,ny,nz))return;
+    set(nx,ny,nz,HOT[cur]);
+    if(collides(P.x,P.y,P.z)){set(nx,ny,nz,0);return}
+    rebuildAround(nx,nz);
+  }
+});
+
+/* ===== particles ===== */
+const parts=[];const pg=new THREE.BoxGeometry(.12,.12,.12);
+function pop(x,y,z,c,n=10){for(let i=0;i<n;i++){const m=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:c}));m.position.set(x,y,z);
+  m.v=new THREE.Vector3((Math.random()-.5)*4,Math.random()*4,(Math.random()-.5)*4);m.l=1;scene.add(m);parts.push(m)}}
+function party(){for(let i=0;i<8;i++)setTimeout(()=>pop(P.x+(Math.random()-.5)*6,P.y+2+Math.random()*3,P.z+(Math.random()-.5)*6,RAIN[i%6],30),i*200)}
+
+/* ===== pigs ===== */
+const pigs=[];
+function mkPig(){
+  const g=new THREE.Group();
+  const bx=(w,h,d,c,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshBasicMaterial({color:c}));m.position.set(x,y,z);g.add(m);return m};
+  bx(.6,.5,.9,0xffa6c9,0,.45,0);bx(.45,.4,.4,0xffb8d4,0,.6,.6);bx(.2,.14,.08,0xff7aa8,0,.55,.82);
+  bx(.06,.06,.02,0x222222,-.12,.7,.81);bx(.06,.06,.02,0x222222,.12,.7,.81);
+  for(const[x,z]of[[-.2,-.3],[.2,-.3],[-.2,.3],[.2,.3]])bx(.15,.25,.15,0xff8fb8,x,.12,z);
+  let x,z,h;do{x=4+Math.random()*(SX-8);z=4+Math.random()*(SZ-8);h=0;while(get(x|0,h+1,z|0))h++}while(h<9);
+  g.position.set(x,h+1,z);g.ry=Math.random()*6;g.vy=0;g.t=0;g.hop=0;scene.add(g);pigs.push(g);
+}
+for(let i=0;i<8;i++)mkPig();
+function updPig(p,dt){
+  p.t-=dt;if(p.t<=0){p.ry+=(Math.random()-.5)*3;p.t=1+Math.random()*2;p.walk=Math.random()<.7}
+  p.rotation.y=p.ry;
+  const sp=p.walk?1.2:0;const nx=p.position.x+Math.sin(p.ry)*sp*dt,nz=p.position.z+Math.cos(p.ry)*sp*dt;
+  if(get(Math.floor(nx),Math.floor(p.position.y+.1),Math.floor(nz))){ // blocked → hop or turn
+    if(p.onG){p.vy=6}else p.ry+=1}
+  else{p.position.x=nx;p.position.z=nz}
+  p.vy-=20*dt;p.position.y+=p.vy*dt;
+  const below=get(Math.floor(p.position.x),Math.floor(p.position.y),Math.floor(p.position.z));
+  p.onG=false;if(below&&p.vy<=0){p.position.y=Math.floor(p.position.y)+1;p.vy=0;p.onG=true}
+  if(p.position.y<-5)p.position.y=SY-5;
+  // happy hop when player is close
+  const d=Math.hypot(p.position.x-P.x,p.position.z-P.z);
+  if(d<3&&p.onG&&Math.random()<.04)p.vy=5;
+}
+
+/* ===== loop ===== */
+let last=performance.now(),time=0;
+function loop(n){
+  requestAnimationFrame(loop);
+  const dt=Math.min(.05,(n-last)/1000);last=n;time+=dt;
+  if(locked){
+    const f=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0);
+    const s=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);
+    const sp=P.fly?10:5.2;
+    const wx=(-Math.sin(P.yaw)*f+Math.cos(P.yaw)*s),wz=(-Math.cos(P.yaw)*f-Math.sin(P.yaw)*s);
+    const l=Math.hypot(wx,wz)||1;
+    P.vx=wx/l*sp*(f||s?1:0);P.vz=wz/l*sp*(f||s?1:0);
+    if(P.fly){P.vy=(keys.Space?7:0)-(keys.ShiftLeft?7:0)}
+    else{P.vy-=26*dt;if(keys.Space&&P.ground){P.vy=8.5}}
+    P.ground=false;
+    moveAxis('x',P.vx*dt);moveAxis('z',P.vz*dt);moveAxis('y',P.vy*dt);
+    if(P.y<-10){P.y=SY;P.vy=0}
+    // magical: stepping near star
+  }
+  cam.position.set(P.x,P.y+EYE,P.z);cam.rotation.set(P.pitch,P.yaw,0);
+  const r=locked?raycast():null;hl.visible=!!r;if(r)hl.position.set(r.b[0]+.5,r.b[1]+.5,r.b[2]+.5);
+  pigs.forEach(p=>updPig(p,dt));
+  for(let i=parts.length-1;i>=0;i--){const m=parts[i];m.v.y-=12*dt;m.position.addScaledVector(m.v,dt);m.l-=dt;m.scale.setScalar(Math.max(.01,m.l));
+    if(m.l<=0){scene.remove(m);m.material.dispose();parts.splice(i,1)}}
+  // twinkle golden stars (they're glow-lit blocks); sky color shift for fun
+  const hue=(time*.01)%1;scene.background.setHSL(.55,.8,.75+Math.sin(time*.2)*.05);scene.fog.color.copy(scene.background);
+  ren.render(scene,cam);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
